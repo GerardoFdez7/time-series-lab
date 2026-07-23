@@ -37,7 +37,6 @@ lab2-data-science/
 ### 1. Clonar el repositorio
 ```bash
 git clone <URL_DEL_REPO>
-cd lab2-data-science
 ```
 
 ### 2. Crear entorno virtual
@@ -47,15 +46,14 @@ source venv/bin/activate       # macOS/Linux
 # venv\Scripts\activate        # Windows
 ```
 
+### Compatibilidad de Python
+
+- Recomendado: Python 3.12 (máxima compatibilidad, incluye `pmdarima` y `prophet`).
+- Python 3.13: el proyecto corre, pero `pmdarima` y `prophet` se omiten automáticamente por falta de soporte estable.
+
 ### 3. Instalar dependencias
 ```bash
 pip install -r requirements.txt
-```
-
-### 4. Colocar el dataset
-Copiar el archivo Excel al directorio `data/raw/`:
-```
-data/raw/Base_Migracion_2009-2026jun.xlsx
 ```
 
 ### 5. Ejecutar los análisis
@@ -71,37 +69,6 @@ python analysis/03_modelos.py
 ```
 
 Los gráficos se guardan automáticamente en `reports/figures/`.
-
-## División de Trabajo
-
-| Script | Responsable | Contenido |
-|--------|-------------|-----------|
-| `analysis/01_eda.py` | Persona 1 | EDA: temporal, países, regiones, vías, outliers |
-| `analysis/02_series_tiempo.py` | Persona 2 | Series, descomposición, ACF/PACF, ADF |
-| `analysis/03_modelos.py` | Persona 3 | ARIMA, Prophet, Holt-Winters, predicciones |
-
-## Flujo de Trabajo en Git
-
-```bash
-# Antes de empezar, siempre pull
-git pull origin main
-
-# Trabajar en tu branch
-git checkout -b feature/01-eda
-
-# Commits descriptivos
-git commit -m "feat(eda): add outlier analysis and boxplots"
-
-# Push y Pull Request
-git push origin feature/01-eda
-```
-
-> **Importante**: Los módulos en `src/` son código compartido. Coordinar antes de modificarlos.
-
-## Fechas de Entrega
-
-- **23 Jul 2026 17:20**: Avance — EDA + análisis de 2 series
-- **26 Jul 2026 23:59**: Entrega completa — todos los modelos y análisis comparativo
 
 ## Categorías de Series Seleccionadas
 
