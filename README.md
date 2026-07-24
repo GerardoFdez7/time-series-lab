@@ -41,7 +41,7 @@ Sigue estos pasos en tu terminal para replicar todo el análisis desde cero:
 
 ### 1. Clonar el repositorio y entrar a la carpeta
 ```bash
-git clone <URL_DEL_REPO>
+git clone https://github.com/GerardoFdez7/time-series-lab.git
 cd time-series-lab
 ```
 
@@ -80,14 +80,6 @@ python analysis/02_series_tiempo.py
 python analysis/03_modelos.py
 ```
 *Toma unos 10-15 minutos. Genera un `dashboard_modelos_<serie>.png` comparando predicciones y mostrando residuos del mejor modelo. La consola imprimirá tablas comparativas de MAE y RMSE.*
-
-## Guía para redactar el Informe (PDF)
-
-Con los resultados generados, la redacción se vuelve un proceso objetivo:
-- **Para la Rúbrica de Análisis (15 pts):** Pega el Dashboard de la serie (Paso B) y comenta sobre la Componente de Tendencia y la Estacional (Fila 2 del dashboard).
-- **Para la Rúbrica de Estacionariedad (20 pts):** Usa la salida en consola del Paso B. Justifica la transformación Log basándote en la fila 3 del dashboard, y justifica la diferenciación `d` basándote en el ACF/PACF y el p-value de Dickey-Fuller (Fila 4 del dashboard).
-- **Para la Rúbrica de Modelos y Predicción (20+15 pts):** Pega el Dashboard de modelos (Paso C) y la tabla de AIC/BIC que imprime la consola. Comenta cuál modelo tiene el menor RMSE.
-- **Para el Análisis Comparativo (15 pts):** Copia directamente las respuestas de la Sección 5 que se imprimen al final del Paso B. Solo te faltará inventar las recomendaciones para el INGUAT.
 
 ## Categorías de Series Seleccionadas
 
