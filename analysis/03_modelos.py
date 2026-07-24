@@ -84,99 +84,78 @@ def split_train_test(serie: pd.Series, ratio: float = TRAIN_RATIO):
     return serie.iloc[:n], serie.iloc[n:]
 
 
-# ================================================================== #
-# ANÁLISIS DE RESIDUOS                                                  #
-# ================================================================== #
-
-
-def analizar_residuos(fit_result: dict, serie_nombre: str) -> None:
-    """
-    Analiza los residuos de un modelo ARIMA ajustado.
-    Requiere que fit_result['fit'] sea un objeto statsmodels SARIMAX.
-    """
-    if fit_result.get("fit") is None:
-        print("  Análisis de residuos no disponible para este modelo.")
-        return
-
-    try:
-        fit = fit_result["fit"]
-        residuos = fit.resid
-
-        fig, axes = plt.subplots(2, 2, figsize=(13, 8))
-
-        # 1. Residuos en el tiempo
-        ax = axes[0, 0]
-        ax.plot(residuos.index, residuos.values, color=PALETTE[0], linewidth=1)
-        ax.axhline(0, color="red", linewidth=0.8)
-        ax.set_title("Residuos en el tiempo")
-
-        # 2. Histograma de residuos
-        ax = axes[0, 1]
-        ax.hist(residuos.dropna(), bins=30, color=PALETTE[1], edgecolor="white", density=True)
-        from scipy import stats
-        mu, std = stats.norm.fit(residuos.dropna())
-        x = np.linspace(residuos.min(), residuos.max(), 100)
-        ax.plot(x, stats.norm.pdf(x, mu, std), color="red", linewidth=2)
-        ax.set_title("Distribución de residuos")
-
-        # 3. Q-Q Plot
-        ax = axes[1, 0]
-        stats.probplot(residuos.dropna(), plot=ax)
-        ax.set_title("Q-Q Plot de residuos")
-
-        # 4. ACF de residuos
-        from statsmodels.graphics.tsaplots import plot_acf
-        plot_acf(residuos.dropna(), lags=20, ax=axes[1, 1])
-        axes[1, 1].set_title("ACF de residuos")
-
-        modelo_name = fit_result["modelo"].replace("(", "_").replace(")", "").replace(",", "_")
-        serie_safe = serie_nombre.replace(" ", "_").replace(":", "")
-        fig.suptitle(f"Análisis de Residuos: {fit_result['modelo']} | {serie_nombre}",
-                     fontsize=12, fontweight="bold")
-        plt.tight_layout()
-        save_fig(f"residuos_{serie_safe}_{modelo_name}")
-
-    except Exception as e:
-        print(f"  ADVERTENCIA en análisis de residuos: {e}")
-
 
 # ================================================================== #
-# GRÁFICO DE PREDICCIONES vs REALES                                     #
+# GRÁFICO CONSOLIDADO DE PREDICCIONES Y RESIDUOS (DASHBOARD)            #
 # ================================================================== #
 
 
-def plot_predicciones(
+def plot_modelos_dashboard(
     train: pd.Series,
     test: pd.Series,
     resultados_modelos: list[dict],
+    best_arima: dict | None,
     serie_nombre: str,
 ) -> None:
-    """Grafica las predicciones de todos los modelos vs los valores reales."""
-    fig, ax = plt.subplots(figsize=(14, 6))
+    """Grafica el dashboard de predicciones (top 3) y análisis de residuos del mejor modelo."""
+    import matplotlib.gridspec as gridspec
+    from scipy import stats
+    from statsmodels.graphics.tsaplots import plot_acf
 
-    # Últimos 24 meses de train para contexto
+    fig = plt.figure(figsize=(16, 10))
+    gs = gridspec.GridSpec(2, 2, figure=fig, hspace=0.3, wspace=0.2)
+
+    # 1. Predicciones vs Reales (Ocupa la fila superior)
+    ax_pred = fig.add_subplot(gs[0, :])
     train_tail = train.iloc[-24:]
-    ax.plot(train_tail.index, train_tail.values / 1e3,
+    ax_pred.plot(train_tail.index, train_tail.values / 1e3,
             color="gray", linewidth=1.5, label="Train (últimos 24m)", alpha=0.6)
-    ax.plot(test.index, test.values / 1e3,
+    ax_pred.plot(test.index, test.values / 1e3,
             color="black", linewidth=2, label="Real (test)", linestyle="--")
 
+    # Graficar solo los top 3 modelos para no saturar
+    top_3 = sorted(resultados_modelos, key=lambda r: r["metricas"]["MAE"])[:3]
     colors = PALETTE[1:]
-    for i, r in enumerate(resultados_modelos):
+    for i, r in enumerate(top_3):
         pred = r["predicciones"]
-        ax.plot(pred.index, pred.values / 1e3,
+        ax_pred.plot(pred.index, pred.values / 1e3,
                 color=colors[i % len(colors)], linewidth=1.5,
-                label=r["modelo"], alpha=0.8)
+                label=f"{r['modelo']} (MAE: {r['metricas']['MAE']:,.0f})", alpha=0.8)
 
-    ax.set_title(f"Predicciones vs Reales: {serie_nombre}", fontweight="bold")
-    ax.set_xlabel("Fecha")
-    ax.set_ylabel("Miles de viajeros")
-    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:.1f}K"))
-    ax.legend(fontsize=8, loc="upper left")
-    plt.tight_layout()
+    ax_pred.set_title(f"1. Predicciones vs Reales (Top 3 Modelos)", fontweight="bold")
+    ax_pred.set_ylabel("Miles de viajeros")
+    ax_pred.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:.1f}K"))
+    ax_pred.legend(fontsize=9, loc="upper left")
+
+    # 2. Análisis de residuos del mejor ARIMA
+    if best_arima and best_arima.get("fit") is not None:
+        try:
+            residuos = best_arima["fit"].resid
+
+            # Histograma de residuos
+            ax_hist = fig.add_subplot(gs[1, 0])
+            ax_hist.hist(residuos.dropna(), bins=30, color=PALETTE[3], edgecolor="white", density=True)
+            mu, std = stats.norm.fit(residuos.dropna())
+            x = np.linspace(residuos.min(), residuos.max(), 100)
+            ax_hist.plot(x, stats.norm.pdf(x, mu, std), color="red", linewidth=2)
+            ax_hist.set_title(f"2a. Distribución de Residuos: {best_arima['modelo']}", fontweight="bold")
+
+            # ACF de residuos
+            ax_acf = fig.add_subplot(gs[1, 1])
+            plot_acf(residuos.dropna(), lags=20, ax=ax_acf, color=PALETTE[4])
+            ax_acf.set_title("2b. ACF de Residuos (Evaluación de Ruido Blanco)", fontweight="bold")
+        except Exception as e:
+            print(f"  ADVERTENCIA gráfica residuos: {e}")
+            ax_blank = fig.add_subplot(gs[1, :])
+            ax_blank.text(0.5, 0.5, "Error al generar gráfico de residuos", ha='center', va='center')
+    else:
+        ax_blank = fig.add_subplot(gs[1, :])
+        ax_blank.text(0.5, 0.5, "Sin modelo ARIMA válido para análisis de residuos", ha='center', va='center')
 
     safe = serie_nombre.replace(" ", "_").replace(":", "")
-    save_fig(f"predicciones_{safe}")
+    fig.suptitle(f"Dashboard de Modelos: {serie_nombre}", fontsize=16, fontweight="bold", y=0.96)
+    fig.subplots_adjust(top=0.90)
+    save_fig(f"dashboard_modelos_{safe}")
 
 
 # ================================================================== #
@@ -295,28 +274,21 @@ def modelar_serie(
         except Exception as e:
             print(f"  Prophet falló: {e}")
 
-    # ── Análisis de residuos del mejor ARIMA ─────────────────────
-    arima_results = [r for r in resultados if "ARIMA" in r["modelo"] or "SARIMA" in r["modelo"]]
-    if arima_results:
-        best_arima = min(
-            arima_results,
-            key=lambda r: r["metricas"]["MAE"]
-        )
-        print(f"\n── Análisis de residuos: {best_arima['modelo']} ──")
-        analizar_residuos(best_arima, nombre)
+    # Residuos se graficarán en el dashboard consolidado
 
     # ── j/k) Tabla comparativa de métricas ───────────────────────
     metricas_list = [r["metricas"] for r in resultados]
     print_comparison_table(metricas_list)
 
-    # ── i) Gráfico de predicciones ────────────────────────────────
-    # Graficar solo los 5 mejores modelos por MAE para no saturar
-    resultados_ordenados = sorted(resultados, key=lambda r: r["metricas"]["MAE"])
-    top_5 = resultados_ordenados[:5]
-    plot_predicciones(train, test, top_5, nombre)
+    # ── i) Gráfico Consolidado de Predicciones y Residuos ──────────
+    # Identificar el mejor ARIMA para los residuos
+    arima_results = [r for r in resultados if "ARIMA" in r["modelo"] or "SARIMA" in r["modelo"]]
+    best_arima = min(arima_results, key=lambda r: r["metricas"]["MAE"]) if arima_results else None
+    
+    plot_modelos_dashboard(train, test, resultados, best_arima, nombre)
 
     # Mejor modelo global
-    mejor = resultados_ordenados[0]
+    mejor = sorted(resultados, key=lambda r: r["metricas"]["MAE"])[0]
     print(f"\n✓ MEJOR MODELO para '{nombre}': {mejor['modelo']}")
     print(f"  MAE={mejor['metricas']['MAE']:,.0f} | RMSE={mejor['metricas']['RMSE']:,.0f}")
 

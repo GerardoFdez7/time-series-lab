@@ -154,134 +154,108 @@ def analizar_serie(info: SerieInfo, color=None, prefix: str = "") -> dict:
     print(f"  Train      : {train.index[0].date()} → {train.index[-1].date()} ({len(train)} obs)")
     print(f"  Test       : {test.index[0].date()} → {test.index[-1].date()} ({len(test)} obs)")
 
-    # ── b) Gráfico de la serie ───────────────────────────────────
-    fig, ax = plt.subplots(figsize=(13, 4))
-    ax.plot(train.index, train.values / 1e3, label="Entrenamiento", color=color or PALETTE[0], linewidth=1.5)
-    ax.plot(test.index, test.values / 1e3, label="Prueba", color="tomato", linewidth=1.5)
-    ax.axvspan(
-        pd.Timestamp("2020-03-01"), pd.Timestamp("2021-12-01"),
-        alpha=0.15, color="red", label="COVID-19"
-    )
-    ax.set_title(f"Serie: {nombre}", fontweight="bold")
-    ax.set_xlabel("Fecha")
-    ax.set_ylabel("Miles de viajeros")
-    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:.1f}K"))
-    ax.legend(fontsize=9)
-    plt.tight_layout()
-    save_fig(f"{safe_name}_a_grafico")
+    # ── CONSTRUCCIÓN DEL DASHBOARD CONSOLIDADO ───────────────────
+    import matplotlib.gridspec as gridspec
 
-    # ── c) Descomposición ────────────────────────────────────────
-    # Usar solo datos de entrenamiento para la descomposición
-    # Necesitamos al menos 2 ciclos completos para descomposición (24 obs)
+    # Crear la figura maestra para esta serie (1 Dashboard = 1 Imagen)
+    fig = plt.figure(figsize=(16, 14))
+    gs = gridspec.GridSpec(4, 2, figure=fig, hspace=0.4, wspace=0.2)
+
+    # 1. Gráfico de la serie (Ocupa las dos columnas de la fila 0)
+    ax_serie = fig.add_subplot(gs[0, :])
+    ax_serie.plot(train.index, train.values / 1e3, label="Entrenamiento", color=color or PALETTE[0], linewidth=1.5)
+    ax_serie.plot(test.index, test.values / 1e3, label="Prueba", color="tomato", linewidth=1.5)
+    ax_serie.axvspan(pd.Timestamp("2020-03-01"), pd.Timestamp("2021-12-01"), alpha=0.15, color="red", label="COVID-19")
+    ax_serie.set_title(f"1. Serie de Tiempo Original: {nombre}", fontweight="bold")
+    ax_serie.set_ylabel("Miles de viajeros")
+    ax_serie.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:.1f}K"))
+    ax_serie.legend(fontsize=9)
+
+    # 2. Descomposición: Tendencia y Estacionalidad (Fila 1)
+    ax_trend = fig.add_subplot(gs[1, 0])
+    ax_season = fig.add_subplot(gs[1, 1])
+
     if len(train) >= 24:
         try:
             decomp = seasonal_decompose(train, model="additive", period=12)
-
-            fig, axes = plt.subplots(4, 1, figsize=(13, 10), sharex=True)
-            axes[0].plot(train.index, decomp.observed / 1e3, color=color or PALETTE[0])
-            axes[0].set_ylabel("Original (K)")
-            axes[1].plot(train.index, decomp.trend / 1e3, color=PALETTE[1])
-            axes[1].set_ylabel("Tendencia (K)")
-            axes[2].plot(train.index, decomp.seasonal / 1e3, color=PALETTE[2])
-            axes[2].set_ylabel("Estacional (K)")
-            axes[3].plot(train.index, decomp.resid / 1e3, color=PALETTE[3])
-            axes[3].axhline(0, color="black", linewidth=0.8)
-            axes[3].set_ylabel("Residuo (K)")
-
-            for ax in axes:
-                ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:.1f}K"))
-
-            fig.suptitle(f"Descomposición Aditiva: {nombre}", fontsize=13, fontweight="bold")
-            plt.tight_layout()
-            save_fig(f"{safe_name}_b_descomposicion")
-
-            # Magnitud de la estacionalidad vs tendencia
+            ax_trend.plot(train.index, decomp.trend / 1e3, color=PALETTE[1])
+            ax_trend.set_title("2a. Componente de Tendencia", fontweight="bold")
+            ax_trend.set_ylabel("Miles de viajeros")
+            
+            ax_season.plot(train.index, decomp.seasonal / 1e3, color=PALETTE[2])
+            ax_season.set_title("2b. Componente Estacional", fontweight="bold")
+            
+            # Magnitud para consola
             seasonal_strength = decomp.seasonal.std()
             trend_strength = decomp.trend.dropna().std()
             print(f"\n  Fuerza estacional (std): {seasonal_strength:,.0f}")
             print(f"  Fuerza de tendencia (std): {trend_strength:,.0f}")
         except Exception as e:
             print(f"  ADVERTENCIA descomposición: {e}")
+            ax_trend.set_title("Descomposición no disponible")
+            ax_season.set_title("Descomposición no disponible")
     else:
         print("  Descomposición omitida (menos de 24 observaciones en train).")
 
-    # ── d) Estacionariedad en varianza (Coef. de Variación) ─────
+    # 3. Estacionariedad en Varianza (Rolling Stats y Log) (Fila 2)
     print("\n  ── Estacionariedad en varianza ──")
     rolling_std = train.rolling(window=12).std()
     rolling_mean = train.rolling(window=12).mean()
     cv_series = (rolling_std / rolling_mean).dropna()
     cv_overall = train.std() / train.mean()
     print(f"  Coef. Variación global: {cv_overall:.4f}")
-    print(f"  CV rodante (media): {cv_series.mean():.4f}")
-
+    print(f"  CV rodante (media)    : {cv_series.mean():.4f}")
+    
     needs_log = cv_series.std() > 0.15
     if needs_log:
-        print("  → Se recomienda transformación logarítmica (varianza no constante)")
+        print("  → CONCLUSIÓN: Varianza NO constante. Se aplica transformación log.")
+        train_log = np.log1p(train)
     else:
-        print("  → Varianza relativamente estable. Transformación logarítmica opcional.")
+        train_log = train
+        print("  → Varianza relativamente estable. No se requiere transformación.")
 
-    # Gráfico: rolling mean & std
-    fig, axes = plt.subplots(2, 1, figsize=(13, 6), sharex=True)
-    axes[0].plot(train.index, train.values / 1e3, color=color or PALETTE[0], alpha=0.7, label="Serie")
-    axes[0].plot(rolling_mean.index, rolling_mean.values / 1e3, color="red", label="Media móvil (12m)")
-    axes[0].set_ylabel("Miles de viajeros")
-    axes[0].legend(fontsize=9)
-    axes[0].set_title(f"Media y Desviación Estándar Rodante: {nombre}", fontweight="bold")
+    ax_var = fig.add_subplot(gs[2, 0])
+    ax_var.plot(rolling_mean.index, rolling_mean.values / 1e3, color="red", label="Media móvil")
+    ax_var.plot(rolling_std.index, rolling_std.values / 1e3, color="steelblue", label="Std móvil")
+    ax_var.set_title("3a. Varianza: Media y Desviación Estándar (12m)", fontweight="bold")
+    ax_var.legend(fontsize=9)
 
-    axes[1].plot(rolling_std.index, rolling_std.values / 1e3, color=PALETTE[3], label="Desv. Estándar móvil (12m)")
-    axes[1].set_ylabel("Std (miles)")
-    axes[1].legend(fontsize=9)
-    plt.tight_layout()
-    save_fig(f"{safe_name}_c_rolling_stats")
+    ax_log = fig.add_subplot(gs[2, 1])
+    ax_log.plot(train_log.index, train_log.values, color=PALETTE[4], linewidth=1.2)
+    ax_log.set_title("3b. Serie Transformada (Log)" if needs_log else "3b. Serie Original (CV aceptable)", fontweight="bold")
 
-    # ── e) Prueba ADF (Dickey-Fuller Aumentada) ──────────────────
+    # 4. Prueba ADF y Correlogramas ACF/PACF (Fila 3)
     print("\n  ── Prueba ADF (Dickey-Fuller Aumentada) ──")
     adf_result = adfuller(train.dropna(), autolag="AIC")
-    adf_stat = adf_result[0]
-    p_value = adf_result[1]
-    n_lags = adf_result[2]
-    critical_values = adf_result[4]
-
-    print(f"  Estadístico ADF : {adf_stat:.6f}")
-    print(f"  p-value         : {p_value:.6f}")
-    print(f"  Nro. de lags    : {n_lags}")
-    print("  Valores críticos:")
-    for level, val in critical_values.items():
-        print(f"    {level}: {val:.6f}")
-
+    adf_stat, p_value, n_lags = adf_result[0], adf_result[1], adf_result[2]
+    
+    print(f"  Estadístico ADF : {adf_stat:.6f} | p-value: {p_value:.6f}")
     is_stationary = p_value < 0.05
     if is_stationary:
         print("  → CONCLUSIÓN: La serie ES estacionaria (p < 0.05). d = 0")
         d_suggested = 0
     else:
         print("  → CONCLUSIÓN: La serie NO ES estacionaria (p ≥ 0.05). Se requiere diferenciación.")
-        # ADF sobre serie diferenciada
         train_diff = train.diff().dropna()
         adf_diff = adfuller(train_diff, autolag="AIC")
-        print(f"\n  ADF sobre serie diferenciada (d=1):")
-        print(f"    Estadístico: {adf_diff[0]:.6f}, p-value: {adf_diff[1]:.6f}")
-        if adf_diff[1] < 0.05:
-            print("  → Una diferenciación (d=1) es suficiente.")
-            d_suggested = 1
-        else:
-            print("  → Puede requerirse d=2. Verificar manualmente.")
-            d_suggested = 2
+        print(f"  ADF Diferenciada (d=1): p-value = {adf_diff[1]:.6f}")
+        d_suggested = 1 if adf_diff[1] < 0.05 else 2
 
-    # ── e-i) ACF y PACF ─────────────────────────────────────────
-    print("\n  ── ACF y PACF ──")
     n_lags_plot = min(36, len(train) // 2 - 1)
+    
+    ax_acf = fig.add_subplot(gs[3, 0])
+    plot_acf(train.dropna(), lags=n_lags_plot, ax=ax_acf, color=color or PALETTE[0])
+    ax_acf.set_title(f"4a. ACF (Autocorrelación) | ADF p-value: {p_value:.3f}", fontweight="bold")
 
-    fig, axes = plt.subplots(1, 2, figsize=(13, 4))
-    plot_acf(train.dropna(), lags=n_lags_plot, ax=axes[0], color=color or PALETTE[0])
-    axes[0].set_title(f"ACF: {nombre}")
+    ax_pacf = fig.add_subplot(gs[3, 1])
+    plot_pacf(train.dropna(), lags=n_lags_plot, ax=ax_pacf, method="ywm", color=color or PALETTE[0])
+    ax_pacf.set_title(f"4b. PACF (Autocorrelación Parcial) | d sugerido: {d_suggested}", fontweight="bold")
 
-    plot_pacf(train.dropna(), lags=n_lags_plot, ax=axes[1], method="ywm",
-              color=color or PALETTE[0])
-    axes[1].set_title(f"PACF: {nombre}")
-
-    plt.suptitle(f"Autocorrelación: {nombre}", fontsize=12, fontweight="bold")
-    plt.tight_layout()
-    save_fig(f"{safe_name}_d_acf_pacf")
+    # Guardar el Dashboard completo
+    fig.suptitle(f"Dashboard de Análisis de Serie: {nombre}", fontsize=18, fontweight="bold", y=0.98)
+    # plt.tight_layout() no funciona tan bien con gridspec a veces, ajustamos márgenes manuales si hace falta
+    fig.subplots_adjust(top=0.92)
+    save_fig(f"dashboard_{safe_name}")
 
     # Sugerir p y q basado en ACF/PACF
     acf_vals = acf(train.dropna(), nlags=n_lags_plot)
@@ -313,17 +287,8 @@ def analizar_serie(info: SerieInfo, color=None, prefix: str = "") -> dict:
     print(f"  ARIMA({p_suggested},{d_suggested},{q_suggested}) como punto de partida")
     print(f"  Nota: Verificar con auto_arima y comparar múltiples modelos en 03_modelos.py")
 
-    # ACF sobre serie diferenciada (si aplica)
-    if not is_stationary:
-        fig, axes = plt.subplots(1, 2, figsize=(13, 4))
-        train_diff = train.diff().dropna()
-        plot_acf(train_diff, lags=n_lags_plot, ax=axes[0])
-        axes[0].set_title(f"ACF (Diferenciada d=1): {nombre}")
-        plot_pacf(train_diff, lags=n_lags_plot, ax=axes[1], method="ywm")
-        axes[1].set_title(f"PACF (Diferenciada d=1): {nombre}")
-        plt.suptitle(f"ACF/PACF Serie Diferenciada: {nombre}", fontsize=12, fontweight="bold")
-        plt.tight_layout()
-        save_fig(f"{safe_name}_e_acf_pacf_diff")
+    # (Opcional) ACF sobre serie diferenciada si el p-value original fue alto, 
+    # pero ya no generamos la imagen suelta para mantener el directorio limpio.
 
     return {
         "nombre": nombre,
@@ -341,6 +306,7 @@ def analizar_serie(info: SerieInfo, color=None, prefix: str = "") -> dict:
         "cv_global": cv_overall,
         "necesita_log": needs_log,
         "train": train,
+        "train_log": train_log,   # Serie con transformación aplicada (o igual a train si no aplica)
         "test": test,
     }
 
@@ -384,11 +350,98 @@ def comparar_series(resultados: list[dict]) -> None:
     plt.tight_layout()
     save_fig("comparativa_todas_series")
 
-    # Preguntas del análisis comparativo (para el informe)
-    print("\n── Para el análisis comparativo (Sección 5 del lab) ──")
-    # Mayor estacionalidad: CV más alto sugiere más variación estacional
+    # ── Sección 5: Análisis comparativo con evidencia estadística ──
+    print("\n" + "=" * 60)
+    print("ANÁLISIS COMPARATIVO (Sección 5 del lab)")
+    print("=" * 60)
+
+    # 5a-iii) Mayor volatilidad: Coeficiente de Variación global
     max_cv = max(resultados, key=lambda r: r["cv_global"])
-    print(f"  Mayor volatilidad (CV): {max_cv['nombre']} (CV={max_cv['cv_global']:.4f})")
+    min_cv = min(resultados, key=lambda r: r["cv_global"])
+    print(f"\n  Mayor volatilidad (CV): {max_cv['nombre']} → CV = {max_cv['cv_global']:.4f}")
+    print(f"  Menor volatilidad (CV): {min_cv['nombre']} → CV = {min_cv['cv_global']:.4f}")
+
+    # 5a-i) Mayor estacionalidad: fuerza estacional de la descomposición
+    # Fuerza estacional = Var(estacional) / (Var(estacional) + Var(residuo))
+    # Requiere descomposición — se calcula aquí desde los datos de train
+    from statsmodels.tsa.seasonal import seasonal_decompose
+    print("\n  ── Mayor estacionalidad (fuerza estacional) ──")
+    fuerzas = []
+    for r in resultados:
+        try:
+            tr = r["train"]
+            if len(tr) >= 24:
+                d = seasonal_decompose(tr, model="additive", period=12)
+                var_s = d.seasonal.var()
+                var_r = d.resid.dropna().var()
+                fuerza = var_s / (var_s + var_r) if (var_s + var_r) > 0 else 0
+            else:
+                fuerza = 0.0
+        except Exception:
+            fuerza = 0.0
+        fuerzas.append({"nombre": r["nombre"], "fuerza_estacional": round(fuerza, 4)})
+    fuerzas_df = pd.DataFrame(fuerzas).sort_values("fuerza_estacional", ascending=False)
+    print(fuerzas_df.to_string(index=False))
+    print(f"  → Mayor estacionalidad: {fuerzas_df.iloc[0]['nombre']} (F={fuerzas_df.iloc[0]['fuerza_estacional']:.4f})")
+
+    # 5a-ii) Mayor tendencia de crecimiento: pendiente de regresión lineal sobre la tendencia
+    print("\n  ── Mayor tendencia de crecimiento (pendiente lineal) ──")
+    pendientes = []
+    for r in resultados:
+        try:
+            tr = r["train"]
+            if len(tr) >= 24:
+                d = seasonal_decompose(tr, model="additive", period=12)
+                trend_vals = d.trend.dropna()
+                x = np.arange(len(trend_vals))
+                slope = np.polyfit(x, trend_vals.values, 1)[0]   # viajeros/mes
+            else:
+                slope = 0.0
+        except Exception:
+            slope = 0.0
+        pendientes.append({"nombre": r["nombre"], "pendiente_mensual": round(slope, 1)})
+    pend_df = pd.DataFrame(pendientes).sort_values("pendiente_mensual", ascending=False)
+    print(pend_df.to_string(index=False))
+    print(f"  → Mayor crecimiento: {pend_df.iloc[0]['nombre']} ({pend_df.iloc[0]['pendiente_mensual']:+,.0f} viajeros/mes)")
+
+    # 5a-iv) Más afectada por pandemia: % de caída en 2020 vs 2019
+    print("\n  ── Impacto de pandemia por serie (caída 2020 vs 2019) ──")
+    impactos = []
+    for r in resultados:
+        tr = r["train"]
+        val_2019 = tr[tr.index.year == 2019].sum()
+        val_2020 = tr[tr.index.year == 2020].sum()
+        pct_caida = ((val_2020 - val_2019) / val_2019 * 100) if val_2019 > 0 else 0
+        impactos.append({"nombre": r["nombre"],
+                         "viajeros_2019": int(val_2019),
+                         "viajeros_2020": int(val_2020),
+                         "caida_pct": round(pct_caida, 1)})
+    impact_df = pd.DataFrame(impactos).sort_values("caida_pct")
+    print(impact_df.to_string(index=False))
+    print(f"  → Más afectada: {impact_df.iloc[0]['nombre']} ({impact_df.iloc[0]['caida_pct']:.1f}%)")
+
+    # Gráfico comparativo de todas las métricas
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+
+    axes[0].barh(fuerzas_df["nombre"], fuerzas_df["fuerza_estacional"],
+                 color=PALETTE[:len(fuerzas_df)], edgecolor="white")
+    axes[0].set_title("Fuerza Estacional", fontweight="bold")
+    axes[0].set_xlabel("Var(S) / (Var(S) + Var(R))")
+
+    axes[1].barh(pend_df["nombre"], pend_df["pendiente_mensual"],
+                 color=[PALETTE[0] if v >= 0 else PALETTE[3] for v in pend_df["pendiente_mensual"]],
+                 edgecolor="white")
+    axes[1].axvline(0, color="black", linewidth=0.8)
+    axes[1].set_title("Pendiente de Tendencia (viajeros/mes)", fontweight="bold")
+
+    axes[2].barh(impact_df["nombre"], impact_df["caida_pct"],
+                 color=PALETTE[:len(impact_df)], edgecolor="white")
+    axes[2].axvline(0, color="black", linewidth=0.8)
+    axes[2].set_title("Caída por Pandemia 2020 vs 2019 (%)", fontweight="bold")
+
+    fig.suptitle("Análisis Comparativo entre Series", fontsize=13, fontweight="bold")
+    plt.tight_layout()
+    save_fig("comparativo_metricas_seccion5")
 
 
 # ================================================================== #
