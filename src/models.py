@@ -341,17 +341,13 @@ def fit_seasonal_naive(
     model_name = "SeasonalNaive"
     print(f"[models] Calculando {model_name}...")
 
-    full_series = pd.concat([train, test])
+    # El pronóstico repite el último ciclo estacional completo observado en
+    # entrenamiento de forma indefinida (estándar en fpp2/fpp3): para el paso
+    # h del conjunto de prueba se usa train[len(train) - m + (h % m)].
     pred_values = []
-
-    for i, idx in enumerate(test.index):
-        lag_idx = i  # posición en test
-        # El valor a usar es el del mismo mes del año anterior en train
-        past_idx = len(train) - m + lag_idx
-        if past_idx >= 0 and past_idx < len(train):
-            pred_values.append(train.iloc[past_idx])
-        else:
-            pred_values.append(np.nan)
+    for i in range(len(test)):
+        past_idx = len(train) - m + (i % m)
+        pred_values.append(train.iloc[past_idx])
 
     pred = pd.Series(pred_values, index=test.index)
 

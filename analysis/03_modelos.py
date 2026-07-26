@@ -131,6 +131,8 @@ def plot_modelos_dashboard(
     if best_arima and best_arima.get("fit") is not None:
         try:
             residuos = best_arima["fit"].resid
+            if callable(residuos):  # pmdarima's auto_arima exposes resid() as a method
+                residuos = pd.Series(residuos())
 
             # Histograma de residuos
             ax_hist = fig.add_subplot(gs[1, 0])
